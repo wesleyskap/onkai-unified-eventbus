@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EventBus.Abstractions/EventBus.Abstractions.csproj" />
+    <Project Path="src/EventBus.Core/EventBus.Core.csproj" />
+    <Project Path="src/EventBus.RabbitMQ/EventBus.RabbitMQ.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EventBus.Tests/EventBus.Tests.csproj" />
+  </Folder>
+</Solution>

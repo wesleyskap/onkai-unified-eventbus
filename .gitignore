@@ -1,0 +1,32 @@
+## Ignore Visual Studio/dotnet build outputs
+[Db]in/
+[Oo]bj/
+[Rr]elease/
+[Dd]ebug/
+
+## Ignore Visual Studio temporary and cache files
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+
+## Ignore Rider/JetBrains settings
+.idea/
+*.sln.iml
+
+## Ignore VS Code settings
+.vscode/
+
+## Ignore OS-specific files
+.DS_Store
+Thumbs.db
+
+## Ignore NuGet packages folder
+packages/
+*.nupkg
+*.snupkg
+
+## Ignore test results and code coverage
+TestResults/
+*.clog

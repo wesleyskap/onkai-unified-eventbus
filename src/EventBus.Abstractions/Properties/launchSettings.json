@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "EventBus.Abstractions": {
+      "commandName": "Project"
+    }
+  }
+}
