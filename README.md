@@ -13,6 +13,7 @@ Broker-agnostic event bus framework for .NET applications. Build highly decouple
 - **CA**: Absolute decoupling of business logic from broker SDKs.
 - **Zero Interface Slicing**: Dynamic runtime type serialization prevents property loss during inheritance and interface passing.
 - **Built-in Correlation**: Automatic tracing with correlation IDs propagated inside message headers.
+- **Background Message Consumption**: Built-in `IHostedService` that boots up message listeners, handles automatic queue declaration & exchange binding (topology), manages message confirmation (ACK/NACK), and resolves consumers in isolated DI scopes with exponential backoff.
 - **Tests**: Comes with in-memory fakes to test publishing and subscription routing without spinning up brokers.
 - **DI Integration**: Fluent APIs designed to fit seamlessly with standard `IServiceCollection` hosting.
 

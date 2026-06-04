@@ -25,6 +25,7 @@ public static class RabbitMqExtensions
 
         builder.Services.AddSingleton(factory);
         builder.Services.AddSingleton<IMessageTransport, RabbitMqTransport>();
+        builder.Services.AddSingleton<IMessageConsumer, RabbitMqConsumer>();
 
         return builder;
     }

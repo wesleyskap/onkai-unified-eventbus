@@ -20,6 +20,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IEventSerializer, JsonEventSerializer>();
         services.AddSingleton<SubscriptionManager>();
         services.AddSingleton<IEventPublisher, EventPublisher>();
+        services.AddHostedService<EventBusHostedService>();
 
         return new EventBusBuilder(services);
     }
