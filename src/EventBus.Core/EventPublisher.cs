@@ -23,6 +23,8 @@ public sealed class EventPublisher : IEventPublisher
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
     }
 
+    private static readonly System.Diagnostics.ActivitySource ActivitySource = new("Onkai.EventBus");
+
     /// <inheritdoc />
     public Task PublishAsync(
         IEvent @event,
@@ -34,25 +36,34 @@ public sealed class EventPublisher : IEventPublisher
             throw new ArgumentNullException(nameof(@event));
         }
 
-        var eventId = Guid.NewGuid().ToString();
-        var eventName = @event.GetType().Name;
-        var correlationId = options?.CorrelationId ?? Guid.NewGuid().ToString();
-        var body = _serializer.Serialize(@event);
+        using var activity = ActivitySource.StartActivity($"Onkai.EventBus.Publish {@event.GetType().Name}", System.Diagnostics.ActivityKind.Producer);
+        var envelope = CreateEnvelope(@event, options, activity);
 
-        var envelope = new TransportEnvelope
+        return _transport.SendAsync(envelope, cancellationToken);
+    }
+
+    private TransportEnvelope CreateEnvelope(IEvent @event, PublishOptions? options, System.Diagnostics.Activity? activity)
+    {
+        var correlationId = options?.CorrelationId ?? activity?.TraceId.ToString() ?? Guid.NewGuid().ToString();
+        var headers = options?.Headers != null ? new Dictionary<string, object>(options.Headers) : new Dictionary<string, object>();
+
+        if (activity?.Id != null)
         {
-            EventId = eventId,
-            EventName = eventName,
-            CorrelationId = correlationId,
-            Body = body,
-            Headers = options?.Headers != null ? new(options.Headers) : new()
-        };
+            headers["traceparent"] = activity.Id;
+        }
 
         if (options?.RoutingKey != null)
         {
-            envelope.Headers["RoutingKeyOverride"] = options.RoutingKey;
+            headers["RoutingKeyOverride"] = options.RoutingKey;
         }
 
-        return _transport.SendAsync(envelope, cancellationToken);
+        return new TransportEnvelope
+        {
+            EventId = Guid.NewGuid().ToString(),
+            EventName = @event.GetType().Name,
+            CorrelationId = correlationId,
+            Body = _serializer.Serialize(@event),
+            Headers = headers
+        };
     }
 }

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-06-04
+
+### Added
+- **Dead Letter Queue (DLQ)**: Automatic queue and binding topology for `Onkai.EventBus.Error` exchange and `{AppName}.Error` error queue in RabbitMQ, with NACK error routing logic.
+- **Distributed Tracing (OpenTelemetry)**: Added support for `ActivitySource` in publishing and consuming pipelines to propagate W3C `traceparent` headers.
+- **Transactional Outbox Pattern**: Added `OutboxMessage` entity, `IOutboxStore` abstraction, `OutboxPublisher` decorator, and `OutboxProcessor` background polling hosted service.
+- **Outbox DI Extensions**: Added `.UseOutbox<TStore>()` fluent registration on `EventBusBuilder`.
+- **Fase 2 Unit Tests**: Added unit tests in `OutboxAndTracingTests.cs` using `FakeOutboxStore` and `ActivityListener` mocks.
+
+### Changed
+- **EventPublisher**: Extracted envelope creation logic into a private helper and integrated publishing trace activities.
+- **RabbitMqConsumer**: Refactored queue setup and processing into smaller SRP-compliant methods and integrated consumer trace activity scoping.
+
 ## [1.1.0] - 2026-06-04
 
 ### Added

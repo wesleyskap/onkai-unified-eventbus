@@ -15,6 +15,7 @@ Mapping of the created projects and their roles in the solution architecture:
   - `Transport/`: Internal infrastructure contracts like `IMessageTransport`, `IMessageConsumer`, and the generic message envelope `TransportEnvelope`.
   - `Serialization/`: Serialization abstraction `IEventSerializer` and default `JsonEventSerializer`.
   - `Subscription/`: Subscription registry `SubscriptionManager` and DI registration helper `SubscriptionInfo`.
+  - `Outbox/`: Interfaces and components for Transactional Outbox pattern (`OutboxMessage`, `IOutboxStore`, `OutboxPublisher`, `OutboxProcessor`).
   - `Extensions/`: Fluent `EventBusBuilder`, helper extension methods to register services, and the generic `EventBusHostedService` background worker.
 - **`src/EventBus.RabbitMQ/`**: Specific RabbitMQ provider module.
   - `RabbitMqTransport.cs`: Adapter wrapping the RabbitMQ SDK (`RabbitMQ.Client` 7.x) to publish messages.
@@ -47,6 +48,12 @@ Mapping of the created projects and their roles in the solution architecture:
    - The payload is deserialized to its target event type.
    - The transient consumer instance (`IEventConsumer<TEvent>`) is resolved from the scope and `ConsumeAsync` is executed.
    - If execution succeeds, the message is acknowledged (ACK); if all retry attempts fail, the message is rejected (NACK with requeue).
+
+### Transactional Outbox Flow
+1. The application registers Outbox via `.UseOutbox<TStore>()`.
+2. When calling `PublishAsync`, `OutboxPublisher` serializes the event and writes an `OutboxMessage` to the registered `IOutboxStore` (using the same local database transaction).
+3. The background service `OutboxProcessor` polls `IOutboxStore` for unpublished messages.
+4. For each pending message, it sends the envelope through `IMessageTransport` and calls `MarkAsPublishedAsync` to finalize the delivery.
 
 ---
 
