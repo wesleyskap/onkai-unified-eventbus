@@ -40,6 +40,8 @@ public sealed class RabbitMqTransport : IMessageTransport, IDisposable
         }
     }
 
+    private const string DelayExchangeName = "Onkai.EventBus.Delay";
+
     /// <inheritdoc />
     public async Task SendAsync(
         TransportEnvelope envelope,
@@ -51,39 +53,93 @@ public sealed class RabbitMqTransport : IMessageTransport, IDisposable
         }
 
         var connection = await GetConnectionAsync(cancellationToken);
-
-        // In RabbitMQ.Client 7+, CreateChannelAsync returns a Task<IChannel>
         using var channel = await connection.CreateChannelAsync(cancellationToken: cancellationToken);
 
-        const string exchangeName = "Onkai.EventBus";
-        var routingKey = envelope.Headers.TryGetValue("RoutingKeyOverride", out var keyObj) && keyObj is string rKey
-            ? rKey
-            : envelope.EventName;
+        var routingKey = envelope.Headers.TryGetValue("RoutingKeyOverride", out var keyObj) && keyObj is string rKey ? rKey : envelope.EventName;
+        var properties = CreateBasicProperties(envelope);
 
-        // Ensure exchange is declared
+        if (envelope.Headers.TryGetValue("DelayMs", out var delayObj) && delayObj is long delayMs)
+        {
+            await PublishWithDelayAsync(channel, envelope, routingKey, delayMs, properties, cancellationToken);
+            return;
+        }
+
+        await PublishDirectAsync(channel, envelope, routingKey, properties, cancellationToken);
+    }
+
+    private async Task PublishWithDelayAsync(
+        IChannel channel,
+        TransportEnvelope envelope,
+        string routingKey,
+        long delayMs,
+        BasicProperties properties,
+        CancellationToken cancellationToken)
+    {
+        var delayQueueName = $"Onkai.EventBus.Delay.{delayMs}";
+        await DeclareDelayTopologyAsync(channel, delayQueueName, delayMs, routingKey, cancellationToken);
+
+        await channel.BasicPublishAsync(
+            exchange: DelayExchangeName,
+            routingKey: $"delay.{delayMs}",
+            mandatory: false,
+            basicProperties: properties,
+            body: envelope.Body,
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task DeclareDelayTopologyAsync(
+        IChannel channel,
+        string delayQueueName,
+        long delayMs,
+        string routingKey,
+        CancellationToken cancellationToken)
+    {
+        await channel.ExchangeDeclareAsync(
+            exchange: DelayExchangeName,
+            type: ExchangeType.Direct,
+            durable: true,
+            autoDelete: false,
+            cancellationToken: cancellationToken);
+
+        await DeclareAndBindDelayQueueAsync(channel, delayQueueName, delayMs, routingKey, cancellationToken);
+    }
+
+    private async Task DeclareAndBindDelayQueueAsync(
+        IChannel channel,
+        string delayQueueName,
+        long delayMs,
+        string routingKey,
+        CancellationToken cancellationToken)
+    {
+        var args = GetDelayQueueArguments(delayMs, routingKey);
+        await channel.QueueDeclareAsync(queue: delayQueueName, durable: true, exclusive: false, autoDelete: false, arguments: args, cancellationToken: cancellationToken);
+        await channel.QueueBindAsync(queue: delayQueueName, exchange: DelayExchangeName, routingKey: $"delay.{delayMs}", cancellationToken: cancellationToken);
+    }
+
+    private Dictionary<string, object?> GetDelayQueueArguments(long delayMs, string routingKey)
+    {
+        return new Dictionary<string, object?>
+        {
+            { "x-message-ttl", delayMs },
+            { "x-dead-letter-exchange", "Onkai.EventBus" },
+            { "x-dead-letter-routing-key", routingKey }
+        };
+    }
+
+    private async Task PublishDirectAsync(
+        IChannel channel,
+        TransportEnvelope envelope,
+        string routingKey,
+        BasicProperties properties,
+        CancellationToken cancellationToken)
+    {
+        const string exchangeName = "Onkai.EventBus";
         await channel.ExchangeDeclareAsync(
             exchange: exchangeName,
             type: ExchangeType.Fanout,
             durable: true,
             autoDelete: false,
             cancellationToken: cancellationToken);
-
-        var properties = new BasicProperties
-        {
-            MessageId = envelope.EventId,
-            CorrelationId = envelope.CorrelationId,
-            Type = envelope.EventName
-        };
-
-        if (properties.Headers == null)
-        {
-            properties.Headers = new Dictionary<string, object?>();
-        }
-
-        foreach (var (headerKey, headerValue) in envelope.Headers)
-        {
-            properties.Headers[headerKey] = headerValue;
-        }
 
         await channel.BasicPublishAsync(
             exchange: exchangeName,
@@ -92,6 +148,24 @@ public sealed class RabbitMqTransport : IMessageTransport, IDisposable
             basicProperties: properties,
             body: envelope.Body,
             cancellationToken: cancellationToken);
+    }
+
+    private BasicProperties CreateBasicProperties(TransportEnvelope envelope)
+    {
+        var properties = new BasicProperties
+        {
+            MessageId = envelope.EventId,
+            CorrelationId = envelope.CorrelationId,
+            Type = envelope.EventName,
+            Headers = new Dictionary<string, object?>()
+        };
+
+        foreach (var (headerKey, headerValue) in envelope.Headers)
+        {
+            properties.Headers[headerKey] = headerValue;
+        }
+
+        return properties;
     }
 
     /// <inheritdoc />

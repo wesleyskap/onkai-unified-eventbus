@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-06-06
+
+### Added
+- **Scheduled / Delayed Messages**: Support for delaying event delivery using TimeSpan delay parameter on `PublishOptions`, mapping to `DelayMs` header.
+- **RabbitMQ Delayed Topology**: Native TTL and Dead Letter Exchange (DLX) queue-based delayed routing in `RabbitMqTransport` (does not require RabbitMQ delay plugin).
+- **Inbox Pattern (Idempotency)**: Added `IInboxStore` interface and `IdempotentConsumer` abstract decorator class in `EventBus.Core` to avoid duplicate processing.
+- **MessageId Propagation**: Added `MessageId` property to `ConsumeContext` and populated it in `RabbitMqConsumer` from the incoming message properties.
+- **Fase 3 Unit Tests**: Added unit tests in `InboxAndDelayTests.cs` validating `IdempotentConsumer` validation and `DelayMs` propagation in publish options.
+
+### Changed
+- **OutboxPublisher**: Updated `CreateOutboxMessage` to support and propagate message delay configurations.
+
 ## [1.2.0] - 2026-06-04
 
 ### Added

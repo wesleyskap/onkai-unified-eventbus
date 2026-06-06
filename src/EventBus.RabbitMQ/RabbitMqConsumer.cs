@@ -162,11 +162,12 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
     {
         var eventName = eventArgs.BasicProperties.Type ?? string.Empty;
         var correlationId = eventArgs.BasicProperties.CorrelationId ?? Guid.NewGuid().ToString();
+        var messageId = eventArgs.BasicProperties.MessageId ?? Guid.NewGuid().ToString();
         var headers = ExtractHeaders(eventArgs.BasicProperties);
 
         try
         {
-            var success = await TryProcessEventWithRetryAsync(eventName, correlationId, headers, eventArgs.Body.ToArray());
+            var success = await TryProcessEventWithRetryAsync(eventName, correlationId, messageId, headers, eventArgs.Body.ToArray());
             await AckOrNackAsync(eventArgs.DeliveryTag, success);
         }
         catch (Exception ex)
@@ -214,6 +215,7 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
     private async Task<bool> TryProcessEventWithRetryAsync(
         string eventName,
         string correlationId,
+        string messageId,
         IReadOnlyDictionary<string, object> headers,
         byte[] body)
     {
@@ -223,7 +225,7 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
         while (attempt < maxAttempts)
         {
             attempt++;
-            if (await InvokeConsumerPipelineAsync(eventName, correlationId, headers, body))
+            if (await InvokeConsumerPipelineAsync(eventName, correlationId, messageId, headers, body))
             {
                 return true;
             }
@@ -237,6 +239,7 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
     private async Task<bool> InvokeConsumerPipelineAsync(
         string eventName,
         string correlationId,
+        string messageId,
         IReadOnlyDictionary<string, object> headers,
         byte[] body)
     {
@@ -253,7 +256,7 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
 
         var serializer = scope.ServiceProvider.GetRequiredService<IEventSerializer>();
         var stronglyTypedEvent = GetDeserializedEvent(serializer, body, eventType, eventName);
-        return await DispatchToSubscribersAsync(scope, stronglyTypedEvent, eventName, correlationId, headers);
+        return await DispatchToSubscribersAsync(scope, stronglyTypedEvent, eventName, correlationId, messageId, headers);
     }
 
     private Activity? StartConsumerActivity(string eventName, string? traceparent)
@@ -278,12 +281,14 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
         IEvent stronglyTypedEvent,
         string eventName,
         string correlationId,
+        string messageId,
         IReadOnlyDictionary<string, object> headers)
     {
         var subscriberTypes = _subscriptionManager.GetHandlersForEvent(eventName);
         var context = new ConsumeContext
         {
             CorrelationId = correlationId,
+            MessageId = messageId,
             Headers = headers
         };
 

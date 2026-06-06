@@ -47,15 +47,7 @@ public sealed class EventPublisher : IEventPublisher
         var correlationId = options?.CorrelationId ?? activity?.TraceId.ToString() ?? Guid.NewGuid().ToString();
         var headers = options?.Headers != null ? new Dictionary<string, object>(options.Headers) : new Dictionary<string, object>();
 
-        if (activity?.Id != null)
-        {
-            headers["traceparent"] = activity.Id;
-        }
-
-        if (options?.RoutingKey != null)
-        {
-            headers["RoutingKeyOverride"] = options.RoutingKey;
-        }
+        PopulateHeaders(headers, options, activity);
 
         return new TransportEnvelope
         {
@@ -65,5 +57,21 @@ public sealed class EventPublisher : IEventPublisher
             Body = _serializer.Serialize(@event),
             Headers = headers
         };
+    }
+
+    private void PopulateHeaders(Dictionary<string, object> headers, PublishOptions? options, System.Diagnostics.Activity? activity)
+    {
+        if (activity?.Id != null)
+        {
+            headers["traceparent"] = activity.Id;
+        }
+        if (options?.RoutingKey != null)
+        {
+            headers["RoutingKeyOverride"] = options.RoutingKey;
+        }
+        if (options?.Delay != null)
+        {
+            headers["DelayMs"] = (long)options.Delay.Value.TotalMilliseconds;
+        }
     }
 }

@@ -19,4 +19,9 @@ public sealed class PublishOptions
     /// Gets or sets an optional routing key override.
     /// </summary>
     public string? RoutingKey { get; set; }
+
+    /// <summary>
+    /// Gets or sets an optional delay duration before the event is delivered.
+    /// </summary>
+    public TimeSpan? Delay { get; set; }
 }

@@ -16,6 +16,7 @@ Mapping of the created projects and their roles in the solution architecture:
   - `Serialization/`: Serialization abstraction `IEventSerializer` and default `JsonEventSerializer`.
   - `Subscription/`: Subscription registry `SubscriptionManager` and DI registration helper `SubscriptionInfo`.
   - `Outbox/`: Interfaces and components for Transactional Outbox pattern (`OutboxMessage`, `IOutboxStore`, `OutboxPublisher`, `OutboxProcessor`).
+  - `Inbox/`: Interfaces and decorators for consumer idempotency (`IInboxStore`, `IdempotentConsumer`).
   - `Extensions/`: Fluent `EventBusBuilder`, helper extension methods to register services, and the generic `EventBusHostedService` background worker.
 - **`src/EventBus.RabbitMQ/`**: Specific RabbitMQ provider module.
   - `RabbitMqTransport.cs`: Adapter wrapping the RabbitMQ SDK (`RabbitMQ.Client` 7.x) to publish messages.
@@ -54,6 +55,22 @@ Mapping of the created projects and their roles in the solution architecture:
 2. When calling `PublishAsync`, `OutboxPublisher` serializes the event and writes an `OutboxMessage` to the registered `IOutboxStore` (using the same local database transaction).
 3. The background service `OutboxProcessor` polls `IOutboxStore` for unpublished messages.
 4. For each pending message, it sends the envelope through `IMessageTransport` and calls `MarkAsPublishedAsync` to finalize the delivery.
+
+### Delayed / Scheduled Messages Flow
+1. When publishing, the user sets the `Delay` property in `PublishOptions`.
+2. The publisher maps the delay duration to a `DelayMs` metadata header inside the transport envelope.
+3. If `DelayMs` is present, the transport (`RabbitMqTransport`):
+   - Dynamically declares a delay exchange `Onkai.EventBus.Delay` (Direct type).
+   - Dynamically declares an inactive TTL queue `Onkai.EventBus.Delay.{delayMs}` with arguments `x-message-ttl` and `x-dead-letter-exchange` pointing to the main exchange.
+   - Publishes the message directly to this TTL queue.
+4. Once the message TTL expires, RabbitMQ automatically routes the message to the main exchange `Onkai.EventBus` where active consumers process it normally.
+
+### Inbox Pattern Idempotency Flow
+1. An event consumer class inherits from `IdempotentConsumer<TEvent>`.
+2. When a message is delivered, the base class extracts `MessageId` (falling back to `CorrelationId` if absent).
+3. The base class queries the registered `IInboxStore` via `HasBeenProcessedAsync(messageId)`.
+4. If the message has already been processed, the handler execution is gracefully skipped (idempotent guard).
+5. If the message is new, the subclass's `ConsumeIdempotentAsync` is executed, and on success, `MarkAsProcessedAsync(messageId)` registers the message ID to block future duplicates.
 
 ---
 

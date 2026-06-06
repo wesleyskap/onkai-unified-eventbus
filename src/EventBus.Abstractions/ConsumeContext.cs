@@ -11,6 +11,11 @@ public sealed class ConsumeContext
     public string? CorrelationId { get; init; }
 
     /// <summary>
+    /// Gets the unique Message ID for identifying duplicates.
+    /// </summary>
+    public string? MessageId { get; init; }
+
+    /// <summary>
     /// Gets the headers associated with this message.
     /// </summary>
     public IReadOnlyDictionary<string, object> Headers { get; init; } = new Dictionary<string, object>();
