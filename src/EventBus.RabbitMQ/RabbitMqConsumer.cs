@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -22,6 +23,9 @@ namespace Onkai.EventBus.RabbitMQ;
 public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
 {
     private const string ExchangeName = "Onkai.EventBus";
+    private const string ErrorExchangeName = "Onkai.EventBus.Error";
+    private static readonly ActivitySource ActivitySource = new("Onkai.EventBus");
+
     private readonly ConnectionFactory _connectionFactory;
     private readonly SubscriptionManager _subscriptionManager;
     private readonly IServiceProvider _serviceProvider;
@@ -47,11 +51,20 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
     }
 
     /// <inheritdoc />
+    /// <inheritdoc />
     public async Task StartConsumingAsync(CancellationToken cancellationToken)
     {
         _connection = await _connectionFactory.CreateConnectionAsync(cancellationToken);
         _channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
 
+        await DeclareExchangesAsync(cancellationToken);
+        await SetupErrorQueueAsync(cancellationToken);
+        await RegisterConsumersAsync(cancellationToken);
+    }
+
+    private async Task DeclareExchangesAsync(CancellationToken cancellationToken)
+    {
+        if (_channel == null) return;
         await _channel.ExchangeDeclareAsync(
             exchange: ExchangeName,
             type: ExchangeType.Fanout,
@@ -59,7 +72,33 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
             autoDelete: false,
             cancellationToken: cancellationToken);
 
-        await RegisterConsumersAsync(cancellationToken);
+        await _channel.ExchangeDeclareAsync(
+            exchange: ErrorExchangeName,
+            type: ExchangeType.Fanout,
+            durable: true,
+            autoDelete: false,
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task SetupErrorQueueAsync(CancellationToken cancellationToken)
+    {
+        if (_channel == null) return;
+        var appName = Assembly.GetEntryAssembly()?.GetName().Name ?? "onkai-unified-bus";
+        var errorQueueName = $"{appName}.Error";
+
+        await _channel.QueueDeclareAsync(
+            queue: errorQueueName,
+            durable: true,
+            exclusive: false,
+            autoDelete: false,
+            arguments: null,
+            cancellationToken: cancellationToken);
+
+        await _channel.QueueBindAsync(
+            queue: errorQueueName,
+            exchange: ErrorExchangeName,
+            routingKey: string.Empty,
+            cancellationToken: cancellationToken);
     }
 
     private async Task RegisterConsumersAsync(CancellationToken cancellationToken)
@@ -73,27 +112,33 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
 
     private async Task SetupQueueAndBindAsync(string appName, string eventName, CancellationToken cancellationToken)
     {
-        if (_channel == null)
-        {
-            throw new InvalidOperationException("RabbitMQ channel is not initialized.");
-        }
-
         var queueName = $"{appName}.{eventName}";
+        await DeclareMainQueueAsync(queueName, cancellationToken);
+        await BindMainQueueAsync(queueName, eventName, cancellationToken);
+        await StartBasicConsumeAsync(queueName, cancellationToken);
+    }
+
+    private async Task DeclareMainQueueAsync(string queueName, CancellationToken cancellationToken)
+    {
+        if (_channel == null) throw new InvalidOperationException("RabbitMQ channel is not initialized.");
+        var arguments = new Dictionary<string, object?> { { "x-dead-letter-exchange", ErrorExchangeName } };
         await _channel.QueueDeclareAsync(
             queue: queueName,
             durable: true,
             exclusive: false,
             autoDelete: false,
-            arguments: null,
+            arguments: arguments,
             cancellationToken: cancellationToken);
+    }
 
+    private async Task BindMainQueueAsync(string queueName, string eventName, CancellationToken cancellationToken)
+    {
+        if (_channel == null) throw new InvalidOperationException("RabbitMQ channel is not initialized.");
         await _channel.QueueBindAsync(
             queue: queueName,
             exchange: ExchangeName,
             routingKey: eventName,
             cancellationToken: cancellationToken);
-
-        await StartBasicConsumeAsync(queueName, cancellationToken);
     }
 
     private async Task StartBasicConsumeAsync(string queueName, CancellationToken cancellationToken)
@@ -117,11 +162,12 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
     {
         var eventName = eventArgs.BasicProperties.Type ?? string.Empty;
         var correlationId = eventArgs.BasicProperties.CorrelationId ?? Guid.NewGuid().ToString();
+        var messageId = eventArgs.BasicProperties.MessageId ?? Guid.NewGuid().ToString();
         var headers = ExtractHeaders(eventArgs.BasicProperties);
 
         try
         {
-            var success = await TryProcessEventWithRetryAsync(eventName, correlationId, headers, eventArgs.Body.ToArray());
+            var success = await TryProcessEventWithRetryAsync(eventName, correlationId, messageId, headers, eventArgs.Body.ToArray());
             await AckOrNackAsync(eventArgs.DeliveryTag, success);
         }
         catch (Exception ex)
@@ -163,12 +209,13 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
             return;
         }
 
-        await _channel.BasicNackAsync(deliveryTag, false, true);
+        await _channel.BasicNackAsync(deliveryTag, false, false);
     }
 
     private async Task<bool> TryProcessEventWithRetryAsync(
         string eventName,
         string correlationId,
+        string messageId,
         IReadOnlyDictionary<string, object> headers,
         byte[] body)
     {
@@ -178,7 +225,7 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
         while (attempt < maxAttempts)
         {
             attempt++;
-            if (await InvokeConsumerPipelineAsync(eventName, correlationId, headers, body))
+            if (await InvokeConsumerPipelineAsync(eventName, correlationId, messageId, headers, body))
             {
                 return true;
             }
@@ -192,26 +239,41 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
     private async Task<bool> InvokeConsumerPipelineAsync(
         string eventName,
         string correlationId,
+        string messageId,
         IReadOnlyDictionary<string, object> headers,
         byte[] body)
     {
-        using var scope = _serviceProvider.CreateScope();
-        var serializer = scope.ServiceProvider.GetRequiredService<IEventSerializer>();
-        var eventType = _subscriptionManager.GetEventTypeByName(eventName);
+        var traceparent = headers.TryGetValue("traceparent", out var val) ? val?.ToString() : null;
+        using var activity = StartConsumerActivity(eventName, traceparent);
 
+        using var scope = _serviceProvider.CreateScope();
+        var eventType = _subscriptionManager.GetEventTypeByName(eventName);
         if (eventType == null)
         {
             _logger.LogWarning("No registered event type found for name '{EventName}'", eventName);
             return false;
         }
 
-        var deserializedEvent = serializer.Deserialize(body, eventType);
-        if (deserializedEvent is not IEvent stronglyTypedEvent)
+        var serializer = scope.ServiceProvider.GetRequiredService<IEventSerializer>();
+        var stronglyTypedEvent = GetDeserializedEvent(serializer, body, eventType, eventName);
+        return await DispatchToSubscribersAsync(scope, stronglyTypedEvent, eventName, correlationId, messageId, headers);
+    }
+
+    private Activity? StartConsumerActivity(string eventName, string? traceparent)
+    {
+        return traceparent != null
+            ? ActivitySource.StartActivity($"Onkai.EventBus.Consume {eventName}", ActivityKind.Consumer, traceparent)
+            : ActivitySource.StartActivity($"Onkai.EventBus.Consume {eventName}", ActivityKind.Consumer);
+    }
+
+    private IEvent GetDeserializedEvent(IEventSerializer serializer, byte[] body, Type eventType, string eventName)
+    {
+        var deserialized = serializer.Deserialize(body, eventType);
+        if (deserialized is not IEvent stronglyTypedEvent)
         {
             throw new InvalidCastException($"Deserialized message payload for '{eventName}' is not of type {nameof(IEvent)}.");
         }
-
-        return await DispatchToSubscribersAsync(scope, stronglyTypedEvent, eventName, correlationId, headers);
+        return stronglyTypedEvent;
     }
 
     private async Task<bool> DispatchToSubscribersAsync(
@@ -219,12 +281,14 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
         IEvent stronglyTypedEvent,
         string eventName,
         string correlationId,
+        string messageId,
         IReadOnlyDictionary<string, object> headers)
     {
         var subscriberTypes = _subscriptionManager.GetHandlersForEvent(eventName);
         var context = new ConsumeContext
         {
             CorrelationId = correlationId,
+            MessageId = messageId,
             Headers = headers
         };
 

@@ -1,32 +1,35 @@
 using Onkai.EventBus.Abstractions;
 using Onkai.EventBus.Core.Serialization;
-using Onkai.EventBus.Core.Transport;
 
-namespace Onkai.EventBus.Core;
+namespace Onkai.EventBus.Core.Outbox;
 
 /// <summary>
-/// Default implementation of the event publisher that serializes events and publishes them via the registered transport.
+/// An implementation of <see cref="IEventPublisher"/> that redirects publishing calls to the transactional outbox store.
+/// 
+/// Example:
+/// <code>
+/// IEventPublisher publisher = new OutboxPublisher(outboxStore, serializer);
+/// await publisher.PublishAsync(new OrderCreatedEvent(...));
+/// </code>
 /// </summary>
-public sealed class EventPublisher : IEventPublisher
+public sealed class OutboxPublisher : IEventPublisher
 {
-    private readonly IMessageTransport _transport;
+    private readonly IOutboxStore _outboxStore;
     private readonly IEventSerializer _serializer;
-
-    /// <summary>
-    /// Initializes a new instance of the EventPublisher class.
-    /// </summary>
-    /// <param name="transport">The transport mechanism to use.</param>
-    /// <param name="serializer">The serializer to use.</param>
-    public EventPublisher(IMessageTransport transport, IEventSerializer serializer)
-    {
-        _transport = transport ?? throw new ArgumentNullException(nameof(transport));
-        _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-    }
 
     private static readonly System.Diagnostics.ActivitySource ActivitySource = new("Onkai.EventBus");
 
+    /// <summary>
+    /// Initializes a new instance of the OutboxPublisher class.
+    /// </summary>
+    public OutboxPublisher(IOutboxStore outboxStore, IEventSerializer serializer)
+    {
+        _outboxStore = outboxStore ?? throw new ArgumentNullException(nameof(outboxStore));
+        _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
+    }
+
     /// <inheritdoc />
-    public Task PublishAsync(
+    public async Task PublishAsync(
         IEvent @event,
         PublishOptions? options = null,
         CancellationToken cancellationToken = default)
@@ -36,26 +39,28 @@ public sealed class EventPublisher : IEventPublisher
             throw new ArgumentNullException(nameof(@event));
         }
 
-        using var activity = ActivitySource.StartActivity($"Onkai.EventBus.Publish {@event.GetType().Name}", System.Diagnostics.ActivityKind.Producer);
-        var envelope = CreateEnvelope(@event, options, activity);
+        using var activity = ActivitySource.StartActivity($"Onkai.EventBus.OutboxPublish {@event.GetType().Name}", System.Diagnostics.ActivityKind.Producer);
 
-        return _transport.SendAsync(envelope, cancellationToken);
+        var message = CreateOutboxMessage(@event, options, activity);
+        await _outboxStore.SaveAsync(message, cancellationToken);
     }
 
-    private TransportEnvelope CreateEnvelope(IEvent @event, PublishOptions? options, System.Diagnostics.Activity? activity)
+    private OutboxMessage CreateOutboxMessage(IEvent @event, PublishOptions? options, System.Diagnostics.Activity? activity)
     {
         var correlationId = options?.CorrelationId ?? activity?.TraceId.ToString() ?? Guid.NewGuid().ToString();
         var headers = options?.Headers != null ? new Dictionary<string, object>(options.Headers) : new Dictionary<string, object>();
 
         PopulateHeaders(headers, options, activity);
 
-        return new TransportEnvelope
+        var serializedHeaders = System.Text.Json.JsonSerializer.Serialize(headers);
+
+        return new OutboxMessage
         {
             EventId = Guid.NewGuid().ToString(),
             EventName = @event.GetType().Name,
             CorrelationId = correlationId,
             Body = _serializer.Serialize(@event),
-            Headers = headers
+            SerializedHeaders = serializedHeaders
         };
     }
 
