@@ -94,4 +94,6 @@ Software engineering guidelines to evolve and extend the EventBus framework secu
 
 ### 5. Best Practices, Performance, and Resilience
 *   **No Service Locator**: Dependencies must be resolved exclusively via constructor injection; avoid using `IServiceProvider.GetService(...)` inside EventBus core logic.
+*   **Reflection-Free Dispatching**: Message execution does not use dynamic reflection invoking (`method.Invoke`). Instead, it uses `IEventConsumerExecutor` to cast and execute consumers directly via virtual interface calls, optimizing dispatch performance and AOT compatibility.
+*   **Native AOT Serialization**: Serializers support source-generated JSON metadata. By supplying custom `JsonSerializerOptions` in DI, developers can utilize source generators to compile high-performance, trimmer-safe Native AOT applications.
 *   **Structured Logging**: Event logs must include metadata (like `CorrelationId` and `EventName`) in a structured format rather than plain string messages.

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-06-06
+
+### Added
+- **Reflection-free Dispatcher**: Implemented `IEventConsumerExecutor` and generic `EventConsumerExecutor<TEvent>` in `EventBus.Core` to cast and execute consumers without reflection.
+- **Source Generator Options**: Added support for injecting `JsonSerializerOptions` in `JsonEventSerializer` constructor and DI registrations, facilitating Native AOT compilation.
+- **Internals Visible To**: Configured assembly visible permissions to expose core internal dispatch interfaces to `EventBus.RabbitMQ` and `EventBus.Tests`.
+- **Fase 4 Unit Tests**: Added unit tests in `AotAndDispatcherTests.cs` verifying custom JSON serializer options and dispatch executors.
+
+### Changed
+- **RabbitMqConsumer**: Replaced dynamic reflection (`MethodInfo.Invoke`) with a high-performance concurrent cache of `IEventConsumerExecutor` implementations.
+- **ServiceCollectionExtensions**: Refactored `AddEventBus` registration to inject `JsonSerializerOptions` dynamically from DI.
+
 ## [1.3.0] - 2026-06-06
 
 ### Added

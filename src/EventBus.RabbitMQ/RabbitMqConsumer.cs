@@ -30,6 +30,7 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
     private readonly SubscriptionManager _subscriptionManager;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<RabbitMqConsumer> _logger;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Type, IEventConsumerExecutor> _executors = new();
 
     private IConnection? _connection;
     private IChannel? _channel;
@@ -295,7 +296,7 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
         foreach (var subType in subscriberTypes)
         {
             var subscriber = scope.ServiceProvider.GetRequiredService(subType);
-            await InvokeSubscriberAsync(subscriber, stronglyTypedEvent, context, subType);
+            await InvokeSubscriberAsync(subscriber, stronglyTypedEvent, context, stronglyTypedEvent.GetType());
         }
 
         return true;
@@ -305,16 +306,15 @@ public sealed class RabbitMqConsumer : IMessageConsumer, IDisposable
         object subscriber,
         IEvent stronglyTypedEvent,
         ConsumeContext context,
-        Type subType)
+        Type eventType)
     {
-        var method = subType.GetMethod("ConsumeAsync");
-        if (method == null)
+        var executor = _executors.GetOrAdd(eventType, t =>
         {
-            throw new InvalidOperationException($"Subscriber type {subType.Name} does not implement ConsumeAsync.");
-        }
+            var executorType = typeof(EventConsumerExecutor<>).MakeGenericType(t);
+            return (IEventConsumerExecutor)Activator.CreateInstance(executorType)!;
+        });
 
-        var task = (Task)method.Invoke(subscriber, [stronglyTypedEvent, context, CancellationToken.None])!;
-        await task;
+        await executor.ExecuteAsync(subscriber, stronglyTypedEvent, context, CancellationToken.None);
     }
 
     /// <inheritdoc />

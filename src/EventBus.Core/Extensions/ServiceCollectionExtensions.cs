@@ -3,6 +3,7 @@ using Onkai.EventBus.Abstractions;
 using Onkai.EventBus.Core.Serialization;
 using Onkai.EventBus.Core.Subscription;
 using Onkai.EventBus.Core.Outbox;
+using System.Text.Json;
 
 namespace Onkai.EventBus.Core.Extensions;
 
@@ -18,7 +19,8 @@ public static class ServiceCollectionExtensions
     /// <returns>An <see cref="EventBusBuilder"/> to chain configuration.</returns>
     public static EventBusBuilder AddEventBus(this IServiceCollection services)
     {
-        services.AddSingleton<IEventSerializer, JsonEventSerializer>();
+        services.AddSingleton<IEventSerializer>(sp =>
+            new JsonEventSerializer(sp.GetService<JsonSerializerOptions>()));
         services.AddSingleton<SubscriptionManager>();
         services.AddSingleton<IEventPublisher, EventPublisher>();
         services.AddHostedService<EventBusHostedService>();
