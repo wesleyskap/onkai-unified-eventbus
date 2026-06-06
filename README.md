@@ -10,10 +10,14 @@ Broker-agnostic event bus framework for .NET applications. Build highly decouple
 ## Features
 
 - **Broker Agnostic**: Switch between RabbitMQ and future providers by changing a single line in your Composition Root.
-- **CA**: Absolute decoupling of business logic from broker SDKs.
-- **Zero Interface Slicing**: Dynamic runtime type serialization prevents property loss during inheritance and interface passing.
-- **Built-in Correlation**: Automatic tracing with correlation IDs propagated inside message headers.
 - **Background Message Consumption**: Built-in `IHostedService` that boots up message listeners, handles automatic queue declaration & exchange binding (topology), manages message confirmation (ACK/NACK), and resolves consumers in isolated DI scopes with exponential backoff.
+- **Transactional Outbox**: Guarantees At-Least-Once event delivery by persisting messages inside the local business transactions using `.UseOutbox<TStore>()`.
+- **Resilient DLQ Routing**: Automatically configures RabbitMQ Dead Letter Exchanges (DLX) and routes failed messages to `{AppName}.Error` after local retries exhaustion.
+- **Distributed Tracing**: Native OpenTelemetry trace propagation using `ActivitySource` (W3C `traceparent` headers).
+- **Scheduled Messages**: Support for sending events with an optional delay (`TimeSpan`) using native TTL & dead-lettering queues (no broker plugins required).
+- **Inbox Pattern**: Easy idempotency enforcement with `IdempotentConsumer<TEvent>` and customizable `IInboxStore` to prevent duplicate message handling.
+- **High Performance / Native AOT**: Reflection-free dispatching using `IEventConsumerExecutor` direct casting and AOT source generator friendly `JsonSerializerOptions` injection.
+- **Zero Interface Slicing**: Dynamic runtime type serialization prevents property loss during inheritance and interface passing.
 - **Tests**: Comes with in-memory fakes to test publishing and subscription routing without spinning up brokers.
 - **DI Integration**: Fluent APIs designed to fit seamlessly with standard `IServiceCollection` hosting.
 
@@ -127,6 +131,30 @@ options.Headers.Add("TenantId", "tenant-123");
 await _publisher.PublishAsync(orderEvent, options, cancellationToken);
 ```
 
+### Scheduled / Delayed Messages
+
+Send events to be delivered in the future using standard RabbitMQ TTL queues:
+
+```csharp
+var options = new PublishOptions
+{
+    Delay = TimeSpan.FromMinutes(10) // Delays execution by 10 minutes
+};
+
+await _publisher.PublishAsync(orderEvent, options, cancellationToken);
+```
+
+### Transactional Outbox Pattern
+
+Guarantees message delivery consistency by writing events to a local database outbox store inside the business transaction:
+
+```csharp
+// Register in Composition Root:
+builder.Services.AddEventBus()
+                .UseRabbitMq(...)
+                .UseOutbox<MyDatabaseOutboxStore>(); // Implement IOutboxStore interface
+```
+
 ### Defining a Consumer
 
 Implement `IEventConsumer<TEvent>` to handle incoming events:
@@ -160,6 +188,28 @@ Register the consumer during DI configuration:
 builder.Services.AddEventBus()
                 .UseRabbitMq(...)
                 .AddConsumer<OrderCreatedEvent, OrderCreatedConsumer>();
+```
+
+### Idempotent Consumers (Inbox Pattern)
+
+Inherit from `IdempotentConsumer<TEvent>` and supply a custom `IInboxStore` to prevent duplicate message handling:
+
+```csharp
+using Onkai.EventBus.Core.Inbox;
+
+public sealed class OrderCreatedConsumer : IdempotentConsumer<OrderCreatedEvent>
+{
+    public OrderCreatedConsumer(IInboxStore store) : base(store) { }
+
+    protected override Task ConsumeIdempotentAsync(
+        OrderCreatedEvent @event, 
+        ConsumeContext context, 
+        CancellationToken cancellationToken)
+    {
+        // Business logic runs here exactly once
+        return Task.CompletedTask;
+    }
+}
 ```
 
 ---
