@@ -210,6 +210,42 @@ public sealed class OrderCreatedConsumer : IdempotentConsumer<OrderCreatedEvent>
         return Task.CompletedTask;
     }
 }
+### Saga Orchestration (Sagas)
+
+Coordinate distributed transaction steps and register automated compensation rollbacks using `SagaOrchestrator<TState>`:
+
+```csharp
+// 1. Register state & store in DI:
+builder.Services.AddEventBus()
+                .AddSaga<OrderSagaState, InMemorySagaStateStore<OrderSagaState>>();
+
+// 2. Register step compensations and execute steps inside consumer:
+public sealed class ReserveStockConsumer : IEventConsumer<ReserveStockEvent>
+{
+    private readonly SagaOrchestrator<OrderSagaState> _orchestrator;
+
+    public ReserveStockConsumer(SagaOrchestrator<OrderSagaState> orchestrator)
+    {
+        _orchestrator = orchestrator;
+        _orchestrator.RegisterCompensation(nameof(ReserveStockEvent), async (ctx, token) =>
+        {
+            // Compensation logic rolls back stock reservation
+            ctx.Data.StockReserved = false;
+        });
+    }
+
+    public Task ConsumeAsync(ReserveStockEvent @event, ConsumeContext context, CancellationToken cancellationToken)
+    {
+        return _orchestrator.ExecuteStepAsync(
+            context.CorrelationId,
+            @event,
+            async (ctx, ev, token) =>
+            {
+                ctx.Data.StockReserved = true;
+            },
+            cancellationToken);
+    }
+}
 ```
 
 ---
