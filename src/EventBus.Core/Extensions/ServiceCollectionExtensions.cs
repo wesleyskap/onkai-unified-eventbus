@@ -3,6 +3,7 @@ using Onkai.EventBus.Abstractions;
 using Onkai.EventBus.Core.Serialization;
 using Onkai.EventBus.Core.Subscription;
 using Onkai.EventBus.Core.Outbox;
+using Onkai.EventBus.Core.Sagas;
 using System.Text.Json;
 
 namespace Onkai.EventBus.Core.Extensions;
@@ -58,6 +59,18 @@ public static class ServiceCollectionExtensions
         builder.Services.AddHostedService<OutboxProcessor>();
         builder.Services.AddSingleton<IEventPublisher, OutboxPublisher>();
 
+        return builder;
+    }
+
+    /// <summary>
+    /// Configures the EventBus to use a Saga Orchestrator with the specified state and storage.
+    /// </summary>
+    public static EventBusBuilder AddSaga<TState, TStore>(this EventBusBuilder builder)
+        where TState : class, new()
+        where TStore : class, ISagaStateStore<TState>
+    {
+        builder.Services.AddSingleton<ISagaStateStore<TState>, TStore>();
+        builder.Services.AddSingleton<Sagas.SagaOrchestrator<TState>>();
         return builder;
     }
 }

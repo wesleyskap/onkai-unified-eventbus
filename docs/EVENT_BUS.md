@@ -17,6 +17,7 @@ Mapping of the created projects and their roles in the solution architecture:
   - `Subscription/`: Subscription registry `SubscriptionManager` and DI registration helper `SubscriptionInfo`.
   - `Outbox/`: Interfaces and components for Transactional Outbox pattern (`OutboxMessage`, `IOutboxStore`, `OutboxPublisher`, `OutboxProcessor`).
   - `Inbox/`: Interfaces and decorators for consumer idempotency (`IInboxStore`, `IdempotentConsumer`).
+  - `Sagas/`: Components for Saga Orchestration pattern (`ISagaStateStore`, `SagaContext`, `SagaOrchestrator`, `InMemorySagaStateStore`).
   - `Extensions/`: Fluent `EventBusBuilder`, helper extension methods to register services, and the generic `EventBusHostedService` background worker.
 - **`src/EventBus.RabbitMQ/`**: Specific RabbitMQ provider module.
   - `RabbitMqTransport.cs`: Adapter wrapping the RabbitMQ SDK (`RabbitMQ.Client` 7.x) to publish messages.
@@ -71,6 +72,16 @@ Mapping of the created projects and their roles in the solution architecture:
 3. The base class queries the registered `IInboxStore` via `HasBeenProcessedAsync(messageId)`.
 4. If the message has already been processed, the handler execution is gracefully skipped (idempotent guard).
 5. If the message is new, the subclass's `ConsumeIdempotentAsync` is executed, and on success, `MarkAsProcessedAsync(messageId)` registers the message ID to block future duplicates.
+
+### Saga Orchestration Flow
+1. The user registers a state model `TState` and store type `TStore` via `.AddSaga<TState, TStore>()` extension method.
+2. In the consumer, the user injects `SagaOrchestrator<TState>` and registers compensation functions for steps via `RegisterCompensation("StepName", callback)`.
+3. The consumer invokes `ExecuteStepAsync(sagaId, event, stepAction, token)`.
+4. The orchestrator retrieves the current `SagaContext<TState>` from `ISagaStateStore<TState>`. If not found, a new state context is created.
+5. If the saga is already marked as `Failed` or `Compensated`, the execution of the step is skipped.
+6. The orchestrator executes the `stepAction` callback.
+   - **On Success**: The step name is appended to `CompletedSteps`, the state is saved, and the saga continues.
+   - **On Failure**: The orchestrator marks the saga status as `Failed`, saves the state, and triggers compensating actions in reverse order of completion (including the failing step), then updates status to `Compensated`.
 
 ---
 
