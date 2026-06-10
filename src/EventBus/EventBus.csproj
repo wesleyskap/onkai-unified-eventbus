@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+
+    <PackageId>Onkai.EventBus</PackageId>
+    <Version>1.5.0</Version>
+
+    <Authors>Wesley Lima</Authors>
+
+    <PackageDescription>
+      Unified EventBus implementation for .NET applications.
+    </PackageDescription>
+
+    <PackageTags>
+      eventbus;messaging;rabbitmq;distributed-systems;pubsub;outbox;idempotency;tracing
+    </PackageTags>
+
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+
+    <RepositoryUrl>
+      https://github.com/wesleyskap/onkai-unified-eventbus
+    </RepositoryUrl>
+
+    <RepositoryType>git</RepositoryType>
+
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <NoBuild>true</NoBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Onkai.EventBus.Abstractions" Version="1.5.0" />
+    <PackageReference Include="Onkai.EventBus.Core" Version="1.5.0" />
+    <PackageReference Include="Onkai.EventBus.RabbitMQ" Version="1.5.0" />
+  </ItemGroup>
+
+</Project>
